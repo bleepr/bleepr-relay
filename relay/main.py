@@ -1,3 +1,4 @@
+#!/usr/bin/python
 from relay import communication_loop
 
 if __name__ == "__main__":
