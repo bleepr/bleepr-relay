@@ -1,6 +1,6 @@
 from pygatt.util import lescan, reset_bluetooth_controller
 
-allowed_addresses = ["20:C3:8F:F6:5B:B1"]
+allowed_addresses = ["20:C3:8F:F6:5E:CE"]
 
 def discover(timeout):
     print("Discovering devices...")

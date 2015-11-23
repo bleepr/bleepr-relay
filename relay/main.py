@@ -1,6 +1,6 @@
 #!/usr/bin/python
-from relay import communication_loop
+from relay import start
 
 if __name__ == "__main__":
     print("Starting up...")
-    communication_loop()
+    start()

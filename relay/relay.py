@@ -5,32 +5,45 @@ import redis
 import uuid
 import requests
 import pexpect
+import api
 from discovery import discover
 from multiprocessing import Process, Queue
 
 r = redis.StrictRedis(host="localhost", port=6379, db=0)
 
-def communication_loop():
+def start():
     workers = {}
-    while True:
-        devices = discover(2)
-        for mac_address in devices:
-            if mac_address not in workers\
-                or not workers[mac_address]["process"].is_alive():
-                workers[mac_address] = {}
-                workers[mac_address]["queue"] = Queue()
-                workers[mac_address]["process"] = Process(target=device_worker,
-                    args=(workers[mac_address]["queue"], mac_address))
-                workers[mac_address]["process"].start()
-        time.sleep(10)
-        # Kill all workers before rescanning
-        any_alive = True
-        while any_alive:
-            any_alive = False
-            for mac_address in workers:
-                if workers[mac_address]["process"].is_alive():
-                    workers[mac_address]["queue"].put("stop")
-                    any_alive = True
+    devices = discover(2)
+    for mac_address in devices:
+        if mac_address not in workers\
+            or not workers[mac_address]["process"].is_alive():
+            workers[mac_address] = {}
+            workers[mac_address]["queue"] = Queue()
+            workers[mac_address]["process"] = Process(target=device_worker,
+                args=(workers[mac_address]["queue"], mac_address))
+            workers[mac_address]["process"].start()
+
+# def communication_loop():
+#     workers = {}
+#     while True:
+#         devices = discover(2)
+#         for mac_address in devices:
+#             if mac_address not in workers\
+#                 or not workers[mac_address]["process"].is_alive():
+#                 workers[mac_address] = {}
+#                 workers[mac_address]["queue"] = Queue()
+#                 workers[mac_address]["process"] = Process(target=device_worker,
+#                     args=(workers[mac_address]["queue"], mac_address))
+#                 workers[mac_address]["process"].start()
+#         time.sleep(30)
+#         # Kill all workers before rescanning
+#         any_alive = True
+#         while any_alive:
+#             any_alive = False
+#             for mac_address in workers:
+#                 if workers[mac_address]["process"].is_alive():
+#                     workers[mac_address]["queue"].put("stop")
+#                     any_alive = True
 
 # Need to make out own connect method, library one doesn't pass MAC address to
 # connect command which causes connection to fail
@@ -45,6 +58,33 @@ def bluetooth_connect(dev, mac_address, timeout):
         raise pygatt.exceptions.BluetoothLEError(
             "Timed-out connecting to device after %s seconds." % timeout)
 
+def handle_device_message(dev, mac_address, message):
+    # This is a bodge to ignore the random crap spewed out by the Arduino on
+    # boot - Need to have proper messages coming from the device
+
+    print("Received message from {}: {}".format(mac_address, message))
+
+    if (len(message) > 1):
+        handle_card_scan(dev, mac_address, message)
+
+def handle_card_scan(dev, mac_address, card_id):
+    table_id = api.get_table_id(mac_address)
+    customer_id = api.get_customer_id(card_id)
+    table_available = api.table_available(table_id, customer_id)
+
+    if customer_id and table_available:
+        # If the table already has an occupancy, update it to set as occupied
+        # if not create a new one
+        occupancy = api.get_occupancy(table_id)
+        if occupancy:
+            api.set_occupied(table_id, occupancy)
+        else:
+            pass
+
+    response = b"access1\x00" if table_available and customer_id\
+        else b"access0\x00"
+    dev.char_write(0x0012, bytearray(response))
+
 def device_worker(queue, mac_address):
     try:
         dev = pygatt.pygatt.BluetoothLEDevice(mac_address,
@@ -52,22 +92,50 @@ def device_worker(queue, mac_address):
 
         bluetooth_connect(dev, mac_address, 5)
 
-        while True:
-            print("working")
-            time.sleep(0.1)
-            # Atomically get and delete the latest messages for this device
-            pipe = r.pipeline()
-            messages = pipe.get(mac_address)
-            pipe.delete(mac_address)
-            messages, _ = pipe.execute()
+        def callback(_, message):
+            try:
+                handle_device_message(dev, mac_address,
+                    message.decode("utf-8").strip())
+            except UnicodeDecodeError:
+                print("Could not understand message from device")
 
-            if messages:
-                # Remove trailing comma, wrap in [] then decode as JSON
-                messages = json.loads("[{}]".format(messages[:-1]))
-                for message in messages:
-                    if "message" in message and \
-                        type(message["message"]) == dict:
-                        process_message(dev, message["message"])
+        dev.subscribe("0000ffe1-0000-1000-8000-00805f9b34fb", callback)
+
+        # Do the same as the library's run method but make it be
+        # possible to stop!
+        while dev.running:
+            # This allowes the parent to stop the process
+            if not queue.empty():
+                queue_entry = queue.get()
+                if queue_entry == "stop":
+                    print("Killing worker")
+                    return
+            with dev.connection_lock:
+                try:
+                    dev._expect("fooooooo", timeout=.1)
+                except pygatt.exceptions.BluetoothLEError:
+                    pass
+            # TODO need some delay to avoid aggresively grabbing the lock,
+            # blocking out the others. worst case is 1 second delay for async
+            # not received as a part of another request
+            time.sleep(.001)
+
+        # while True:
+        #     print("working")
+        #     time.sleep(0.1)
+        #     # Atomically get and delete the latest messages for this device
+        #     pipe = r.pipeline()
+        #     messages = pipe.get(mac_address)
+        #     pipe.delete(mac_address)
+        #     messages, _ = pipe.execute()
+        #
+        #     if messages:
+        #         # Remove trailing comma, wrap in [] then decode as JSON
+        #         messages = json.loads("[{}]".format(messages[:-1]))
+        #         for message in messages:
+        #             if "message" in message and \
+        #                 type(message["message"]) == dict:
+        #                 process_message(dev, message["message"])
 
             # # Read data from device and make POST requests as required
             # value = dev.char_read_hnd(0x0e)
@@ -77,12 +145,6 @@ def device_worker(queue, mac_address):
             #         uuid.uuid4()))
             #     dev.char_write(0x0e, bytearray([0x00]))
 
-            # This allowes the parent to stop the process
-            if not queue.empty():
-                queue_entry = queue.get()
-                if queue_entry == "stop":
-                    print("Killing worker")
-                    return
     except pygatt.exceptions.BluetoothLEError as ex:
         print("Bluetooth error ({}), killing worker for {}".format(str(ex),
             mac_address))
@@ -90,7 +152,7 @@ def device_worker(queue, mac_address):
 
 def process_message(dev, message):
     print(message)
-    displaytext = message["button"] + "~"
+    displaytext = message["button"] + "\x00"
     dev.char_write(0x0012, bytearray(displaytext.encode("UTF-8")))
     # if message["button"] == "ledon":
     #     dev.char_write(0x0e, bytearray([0x00]))

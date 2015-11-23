@@ -20,7 +20,7 @@ class SocketClient(WebSocketClient):
     def received_message(self, message):
         message = str(message)
         data = json.loads(message)
-        data["device"] = "20:C3:8F:F6:5B:B1" # Temp hack, MAC should come from server
+        data["device"] = "20:C3:8F:F6:5E:CE" # Temp hack, MAC should come from server
 
         mac_address = data["device"]
         r.append(mac_address, "{0},".format(message))
