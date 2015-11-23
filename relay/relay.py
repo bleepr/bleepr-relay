@@ -64,8 +64,15 @@ def handle_device_message(dev, mac_address, message):
 
     print("Received message from {}: {}".format(mac_address, message))
 
-    if (len(message) > 1):
-        handle_card_scan(dev, mac_address, message)
+    message_parts = message.split(",")
+    if (message_parts[0] == "card_scan"):
+        handle_card_scan(dev, mac_address, message[1])
+    elif (message_parts[1] == "request_bill"):
+        request_bill(dev, mac_address)
+    elif (message_parts[1] == "call_waiter"):
+        call_waiter(dev, mac_address)
+    elif (message_parts[1] == "leave_table"):
+        leave_table(dev, mac_address)
 
 def handle_card_scan(dev, mac_address, card_id):
     table_id = api.get_table_id(mac_address)
@@ -79,11 +86,35 @@ def handle_card_scan(dev, mac_address, card_id):
         if occupancy:
             api.set_occupied(table_id, occupancy)
         else:
-            pass
+            api.create_new_occupancy(table_id, customer_id)
 
     response = b"access1\x00" if table_available and customer_id\
         else b"access0\x00"
     dev.char_write(0x0012, bytearray(response))
+
+def request_bill(dev, mac_address):
+    table_id = api.get_table_id(mac_address)
+    api.request_bill(table_id)
+
+    dev.char_write(0x0012, bytearray(b"ok\x00"))
+
+def call_waiter(dev, mac_address):
+    table_id = api.get_table_id(mac_address)
+    api.call_waiter(table_id)
+
+    dev.char_write(0x0012, bytearray(b"ok\x00"))
+
+def leave_table(dev, mac_address):
+    table_id = api.get_table_id(mac_address)
+    api.leave_table(table_id)
+
+    dev.char_write(0x0012, bytearray(b"ok\x00"))
+
+def get_order_status(dev, mac_address):
+    table_id = api.get_table_id(mac_address)
+    order_status = api.get_order_status(table_id)
+
+    dev.char_write(0x0012, bytearray(order_status.encode("utf-8") + "\x00"))
 
 def device_worker(queue, mac_address):
     try:

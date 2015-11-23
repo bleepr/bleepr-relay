@@ -58,9 +58,45 @@ def get_occupancy(table_id):
 
 def set_occupied(table_id, occupancy):
     r = requests.put("{}/tables/{}/occupancies/{}".format(endpoint, table_id,
-        occupancy), {"occupancy": {"occupied": True}})
+        occupancy), data=json.dumps({"occupancy": {"occupied": True}}),
+            headers={'content-type': 'application/json'})
 
-    print(r.status_code)
+def create_new_occupancy(table_id, customer_id):
+    r = requests.post("{}/tables/{}/occupancies/".format(endpoint, table_id),
+            data=json.dumps({"occupancy": {
+                "prebooked": False,
+                "start": datetime.datetime.now().isoformat(),
+                "occupied": True,
+                "customer_id": customer_id,
+                "table_id": table_id
+            }}),
+            headers={'content-type': 'application/json'})
+
+def request_bill(table_id):
+    r = requests.post("{}/tables/{}/request_bill".format(endpoint, table_id))
+
+def call_waiter(table_id):
+    r = requests.post("{}/tables/{}/call_waiter".format(endpoint, table_id))
+
+def leave_table(table_id):
+    r = requests.post("{}/tables/{}/leave_table".format(endpoint, table_id))
+
+def get_order_status(table_id):
+    r = requests.get("{}/tables/{}/orders".format(endpoint, table_id))
+
+    orders = json.loads(r.text)
+    status_counts = {}
+    for order in orders:
+        if order["status"] not in status_counts:
+            status_counts[order["status"]] = 1
+        else:
+            status_counts[order["status"]] += 1
+
+    parts = []
+    for status in status_counts.keys():
+        parts.append("{} {}".format(status_counts[status], status))
+
+    return ", ".join(parts)
 
 if __name__ == "__main__":
-    print(is_table_booked(45))
+    print(get_order_status(45))
