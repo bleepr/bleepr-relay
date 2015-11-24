@@ -67,11 +67,11 @@ def handle_device_message(dev, mac_address, message):
     message_parts = message.split(",")
     if (message_parts[0] == "card_scan"):
         handle_card_scan(dev, mac_address, message[1])
-    elif (message_parts[1] == "request_bill"):
+    elif (message_parts[0] == "request_bill"):
         request_bill(dev, mac_address)
-    elif (message_parts[1] == "call_waiter"):
+    elif (message_parts[0] == "call_waiter"):
         call_waiter(dev, mac_address)
-    elif (message_parts[1] == "leave_table"):
+    elif (message_parts[0] == "leave_table"):
         leave_table(dev, mac_address)
 
 def handle_card_scan(dev, mac_address, card_id):
